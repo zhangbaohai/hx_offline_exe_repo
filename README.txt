@@ -1,2 +1,3 @@
-v2.3.5b 重发：批量转账 - 行别信息类型支持空；选择行号后若银行名称包含“华夏银行”，自动设为行内且行别信息类型置空；导入允许该列为空。
-运行：pip install -r requirements.txt && python app_exact.py；或推到 GitHub 走 Actions 产出 exe。
+v2.3.5c 修复：把 PayrollTab/TransferTab/LibraryTab 全部并入 app_exact.py，避免 NameError。
+运行：pip install -r requirements.txt && python app_exact.py
+功能：行号库导入(txt/xls/xlsx/csv)；新增编辑；批量导入校验；自动识别“华夏银行”设置转账方式；行别信息类型可为空。

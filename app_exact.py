@@ -5,12 +5,13 @@ import pandas as pd
 from pathlib import Path
 import os, re, csv, zipfile
 
+# --- hard import to ensure bundling ---
 try:
     import openpyxl  # noqa: F401
 except Exception:
     openpyxl = None
 try:
-    import xlrd
+    import xlrd  # must be 1.2.0
 except Exception:
     xlrd = None
 
@@ -81,7 +82,7 @@ def read_any(path: str):
         return pd.read_excel(path, engine="openpyxl", dtype=str)
     if ext == ".xls":
         if xlrd is None:
-            raise RuntimeError("读取 .xls 需要 xlrd==1.2.0，请按 requirements.txt 安装或将文件另存为 .xlsx/CSV。")
+            raise RuntimeError("读取 .xls 需要 xlrd==1.2.0，请按 requirements.txt 安装或另存为 .xlsx/CSV。")
         return pd.read_excel(path, engine="xlrd", dtype=str)
     if ext == ".csv":
         return pd.read_csv(path, dtype=str, engine="python", sep=None, on_bad_lines="skip")
@@ -381,6 +382,94 @@ class PayrollDialog(tk.Toplevel):
             messagebox.showwarning("校验不通过", "；".join(probs)); return
         self.values = vals; self.destroy()
 
+class PayrollTab(ttk.Frame):
+    COLS = ["收款人银行名称","收款人卡号","收款人名称","金额"]
+    def __init__(self, master):
+        super().__init__(master)
+        self.df = pd.DataFrame(columns=self.COLS); self._build()
+
+    def _build(self):
+        top = ttk.Frame(self); top.pack(fill="x", padx=8, pady=8)
+        ttk.Button(top, text="新增", command=self.add_one).pack(side="left")
+        ttk.Button(top, text="编辑选中", command=self.edit_one).pack(side="left", padx=6)
+        ttk.Button(top, text="删除选中", command=self.delete_selected).pack(side="left", padx=6)
+        ttk.Button(top, text="导入代发工资文件", command=self.import_file).pack(side="left", padx=12)
+        ttk.Button(top, text="校验并导出（无表头）", command=self.validate_export).pack(side="left", padx=6)
+        self.stree = ScrollableTree(self, height=18); self.stree.pack(fill="both", expand=True, padx=8, pady=6)
+        self._reload()
+
+    def _reload(self):
+        tree = self.stree.tree
+        df = self.df
+        tree["columns"] = list(df.columns)
+        for col in df.columns:
+            tree.heading(col, text=col)
+            width = 240 if ("名称" in col) else 180
+            tree.column(col, width=width, anchor="w")
+        tree.delete(*tree.get_children())
+        for _, row in df.iterrows():
+            tree.insert("", "end", values=[str(row.get(c,"")) for c in df.columns])
+
+    def add_one(self):
+        dlg = PayrollDialog(self); self.wait_window(dlg)
+        if getattr(dlg, "values", None):
+            self.df.loc[len(self.df)] = [dlg.values[c] for c in self.COLS]; self._reload()
+
+    def edit_one(self):
+        tree = self.stree.tree; sel = tree.selection()
+        if not sel: messagebox.showinfo("提示","请先选择一行"); return
+        idx = tree.index(sel[0]); init = {c: str(self.df.iloc[idx][c]) for c in self.COLS}
+        dlg = PayrollDialog(self, init_values=init); self.wait_window(dlg)
+        if getattr(dlg, "values", None):
+            for c in self.COLS: self.df.at[self.df.index[idx], c] = dlg.values[c]
+            self._reload()
+
+    def delete_selected(self):
+        tree = self.stree.tree; sel = tree.selection()
+        if not sel: return
+        idx = tree.index(sel[0]); self.df = self.df.drop(self.df.index[idx]).reset_index(drop=True); self._reload()
+
+    def import_file(self):
+        path = filedialog.askopenfilename(filetypes=[("Excel/CSV","*.xlsx;*.xls;*.csv")])
+        if not path: return
+        try:
+            df = read_any(path)
+        except Exception as e:
+            messagebox.showerror("失败", f"读取失败：{e}"); return
+        if not set(self.COLS).issubset(set(df.columns)):
+            df = df.iloc[:, :4]
+            df.columns = self.COLS
+        errors = []
+        for idx, r in df.fillna("").iterrows():
+            if str(r["收款人银行名称"]).strip()=="" : errors.append(f"第{idx+1}行：收款人银行名称 为空")
+            if not re.fullmatch(r"\d{6,32}", str(r["收款人卡号"])): errors.append(f"第{idx+1}行：收款人卡号 非6-32位数字")
+            if str(r["收款人名称"]).strip()=="" : errors.append(f"第{idx+1}行：收款人名称 为空")
+            try:
+                if float(str(r["金额"]))<=0: errors.append(f"第{idx+1}行：金额 ≤ 0")
+            except Exception:
+                errors.append(f"第{idx+1}行：金额 非数字")
+        if errors:
+            messagebox.showerror("校验失败","导入中止：\n" + "\n".join(errors[:30]) + ("\n..." if len(errors)>30 else ""))
+            return
+        self.df = df[self.COLS].astype(str); self._reload()
+        messagebox.showinfo("成功","导入成功，已加载到下方明细，可继续编辑。")
+
+    def validate_export(self):
+        df = self.df.fillna("")
+        probs = []
+        if df["收款人银行名称"].str.strip().eq("").any(): probs.append("收款人银行名称 不能为空")
+        if (~df["收款人卡号"].astype(str).str.match(r"^\d{6,32}$", na=False)).any(): probs.append("收款人卡号 格式异常")
+        if df["收款人名称"].str.strip().eq("").any(): probs.append("收款人名称 不能为空")
+        try:
+            if (pd.to_numeric(df["金额"], errors="coerce")<=0).any(): probs.append("金额 必须大于0")
+        except Exception:
+            probs.append("金额 不是可解析数字")
+        if probs: messagebox.showwarning("校验结果","；".join(probs))
+        path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel",".xlsx")])
+        if not path: return
+        export_text_xlsx(self.df, path, include_header=False)
+        messagebox.showinfo("成功", "已导出（无表头，文本格式）")
+
 class TransferDialog(tk.Toplevel):
     COLS = ["收款方账号","收款方户名","金额","转账方式","行别信息类型",
             "收款方银行名称","收款方银行大额支付行号/跨行清算行号","用途","明细标注"]
@@ -568,7 +657,7 @@ class TransferTab(ttk.Frame):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("华夏离线批量编辑器 v2.3.5b")
+        self.title("华夏离线批量编辑器 v2.3.5c")
         self.minsize(1200, 760)
         ensure_db(DB_PATH)
         nb = ttk.Notebook(self); nb.pack(fill="both", expand=True)
