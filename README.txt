@@ -1,3 +1,4 @@
-v2.3.5c 修复：把 PayrollTab/TransferTab/LibraryTab 全部并入 app_exact.py，避免 NameError。
-运行：pip install -r requirements.txt && python app_exact.py
-功能：行号库导入(txt/xls/xlsx/csv)；新增编辑；批量导入校验；自动识别“华夏银行”设置转账方式；行别信息类型可为空。
+华夏离线批量编辑器 v2.3.6-r3
+— 新增：编辑区支持背景图片（视图→设置背景图…），自动适应尺寸、低透明水印；
+— 你的城市照片重命名为 bg.jpg 丢到程序根目录即可；或菜单里选择任意图片。
+— 其余功能同 v2.3.6：多格式导入、IBPS/CNAPS 本地库、导入后显示明细、UI 自适应、自动判定“华夏银行”等。
